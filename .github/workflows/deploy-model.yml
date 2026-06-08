@@ -29,7 +29,7 @@ jobs:
       - run: npx --yes @redocly/cli lint openapi.yaml
 
       - name: Lint Dockerfile with hadolint
-        uses: hadolint/hadolint-action@v2
+        uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: Dockerfile
           failure-threshold: warning
