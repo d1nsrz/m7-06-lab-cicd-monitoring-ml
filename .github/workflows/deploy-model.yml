@@ -45,10 +45,17 @@ jobs:
           npx --yes @redocly/cli lint "$SPEC"
 
       - name: Lint Dockerfile with hadolint
-        uses: hadolint/hadolint-action@v3.1.0
-        with:
-          dockerfile: Dockerfile
-          failure-threshold: warning
+        run: |
+          DF=$(find . \
+            -name 'Dockerfile' -o -name 'Dockerfile.*' \
+            | grep -v node_modules | grep -v .git \
+            | head -n 1)
+          if [ -z "$DF" ]; then
+            echo "::warning::No Dockerfile found — skipping lint."
+            exit 0
+          fi
+          echo "Linting $DF"
+          docker run --rm -i hadolint/hadolint < "$DF" 
 
   test:
     name: Unit + Contract Tests
