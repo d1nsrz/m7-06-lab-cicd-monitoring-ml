@@ -1,0 +1,140 @@
+groups:
+  - name: vision-moderation.availability
+    rules:
+
+      # ── Fast burn: 2% of monthly error budget consumed in 1 h ──────────────
+      # Monthly error budget at 99.5% availability = 0.5% = 216 min/month
+      # 2% of that budget in 1 h  →  burn rate factor = 14.4
+      # (formula: budget_fraction / window_fraction = 0.02 / (1h/720h))
+      - alert: AvailabilityBurnFast
+        expr: |
+          (
+            sum(rate(http_requests_total{job="vision-moderation",code=~"5.."}[1h]))
+            /
+            sum(rate(http_requests_total{job="vision-moderation"}[1h]))
+          ) > (14.4 * (1 - 0.995))
+          and
+          (
+            sum(rate(http_requests_total{job="vision-moderation",code=~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total{job="vision-moderation"}[5m]))
+          ) > (14.4 * (1 - 0.995))
+        for: 5m
+        labels:
+          severity: page
+          team: ml-platform
+        annotations:
+          summary: "Availability fast burn: >2% of monthly error budget in 1 h"
+          description: >
+            Current 1 h error rate is burning the monthly availability budget
+            at >14.4x the sustainable rate. Immediate investigation required.
+          runbook: "https://runbooks.example.com/vision-moderation/availability-burn"
+
+      # ── Slow burn: 10% of monthly error budget consumed in 24 h ───────────
+      # 10% of budget in 24 h  →  burn rate factor = 3.0
+      # (0.10 / (24h/720h))
+      - alert: AvailabilityBurnSlow
+        expr: |
+          (
+            sum(rate(http_requests_total{job="vision-moderation",code=~"5.."}[6h]))
+            /
+            sum(rate(http_requests_total{job="vision-moderation"}[6h]))
+          ) > (3.0 * (1 - 0.995))
+          and
+          (
+            sum(rate(http_requests_total{job="vision-moderation",code=~"5.."}[30m]))
+            /
+            sum(rate(http_requests_total{job="vision-moderation"}[30m]))
+          ) > (3.0 * (1 - 0.995))
+        for: 15m
+        labels:
+          severity: ticket
+          team: ml-platform
+        annotations:
+          summary: "Availability slow burn: >10% of monthly error budget in 24 h"
+          description: >
+            Sustained elevated error rate is on track to exhaust 10% of the
+            monthly availability budget within 24 h. Create a ticket and investigate.
+          runbook: "https://runbooks.example.com/vision-moderation/availability-burn"
+
+  - name: vision-moderation.latency
+    rules:
+
+      # ── p99 latency > 1 s for 5 minutes ────────────────────────────────────
+      - alert: LatencyP99High
+        expr: |
+          histogram_quantile(
+            0.99,
+            sum(
+              rate(http_request_duration_seconds_bucket{
+                job="vision-moderation",
+                route="/v1/moderation"
+              }[5m])
+            ) by (le)
+          ) > 1.0
+        for: 5m
+        labels:
+          severity: page
+          team: ml-platform
+        annotations:
+          summary: "p99 latency exceeds 1 s SLO on /v1/moderation"
+          description: >
+            The 99th-percentile request latency has been above 1.0 s for at
+            least 5 minutes. This breaches the latency SLO.
+          runbook: "https://runbooks.example.com/vision-moderation/latency-p99"
+
+  - name: vision-moderation.drift
+    rules:
+
+      # ── Input-feature drift (PSI) > 0.2 for 1 hour ────────────────────────
+      - alert: DriftDetected
+        expr: |
+          max(
+            feature_drift_psi{job="vision-moderation"}
+          ) by (feature) > 0.2
+        for: 60m
+        labels:
+          severity: ticket
+          team: ml-platform
+        annotations:
+          summary: "Input-feature drift (PSI > 0.2) sustained for 1 h — feature={{ $labels.feature }}"
+          description: >
+            Population Stability Index for feature "{{ $labels.feature }}" has
+            exceeded 0.2 for a full hour, indicating significant distribution
+            shift versus the training baseline.
+          runbook: "https://runbooks.example.com/vision-moderation/drift"
+
+  - name: vision-moderation.model-version
+    rules:
+
+      # ── Model version mismatch (registry vs serving header) ────────────────
+      - alert: ModelVersionMismatch
+        expr: |
+          count(
+            kube_pod_labels{
+              job="vision-moderation",
+              label_model_version!~".*"   # label absent means unhealthy pods
+            }
+          ) > 0
+          or
+          count by (served_version) (
+            label_replace(
+              model_serving_version{job="vision-moderation"},
+              "served_version", "$1", "version", "(.*)"
+            )
+          ) unless on(served_version)
+          label_replace(
+            model_registry_current_version{job="vision-moderation"},
+            "served_version", "$1", "version", "(.*)"
+          )
+        for: 5m
+        labels:
+          severity: page
+          team: ml-platform
+        annotations:
+          summary: "Model version mismatch: a replica is serving a version not in registry"
+          description: >
+            At least one replica has been returning a model_version response
+            header that does not match the version registered in the model
+            registry. This may indicate a failed or partial rollout.
+          runbook: "https://runbooks.example.com/vision-moderation/model-version-mismatch"
